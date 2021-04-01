@@ -64,27 +64,27 @@ void QtObsWebsocket::disconnect() {
   m_socket.close();
 }
 
-OBSVersion QtObsWebsocket::getVersion() {
+const OBSVersion QtObsWebsocket::getVersion() {
   // No authentication needed for this command
   QJsonObject response = sendRequest("GetVersion");
   return OBSVersion(response);
 }
 
-OBSAuthInfo QtObsWebsocket::getAuthInfo() {
+const OBSAuthInfo QtObsWebsocket::getAuthInfo() {
   // No authentication needed for this command
   QJsonObject response = sendRequest("GetAuthRequired");
   return OBSAuthInfo(response);
 }
 
-bool QtObsWebsocket::authenticate(QString password, OBSAuthInfo authInfo) {
+const bool QtObsWebsocket::authenticate(QString password, OBSAuthInfo authInfo) {
   QString secret = hashEncode(password + authInfo.PasswordSalt);
-  QString authResponse = hashEncode(secret + authInfo.Challenge);
+  QString auth_response = hashEncode(secret + authInfo.Challenge);
 
   QJsonObject auth_request;
-  auth_request["auth"] = authResponse;
+  auth_request["auth"] = auth_response;
 
-  QJsonObject responseJson = sendRequest("Authenticate", auth_request);
-  OBSResponse response(responseJson);
+  QJsonObject response_json = sendRequest("Authenticate", auth_request);
+  OBSResponse response(response_json);
 
   if (response.Status == "ok") {
     return true;
@@ -121,7 +121,7 @@ void QtObsWebsocket::setCurrentScene(QString scene) {
   sendAuthenticatedCommand("SetCurrentScene", parameters);
 }
 
-QString QtObsWebsocket::generateMessageId(const size_t length) {
+const QString QtObsWebsocket::generateMessageId(const size_t length) {
   static std::array<char, 63> pool = {
     "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"};
 
@@ -144,41 +144,66 @@ void QtObsWebsocket::onDisconnected() {
 }
 
 void QtObsWebsocket::onTextMessageReceived(QString message) {
-  m_response = message;
+  QJsonObject response = responseToJsonObject(message);
+
+  if (response["message-id"].isString()) {
+    const QString message_id = response["message-id"].toString();
+    if (m_message_handler.find(message_id) != m_message_handler.end()) {
+      m_response = response;
+      m_message_handler.remove(message_id);
+    } else {
+      qWarning() << "Warning: No message with id: " << message_id << " have been sent!";
+    }
+  } else if (response["update-type"].isString()) {
+    // Handle an event
+    QString eventType = response["update-type"].toString();
+
+    response.remove("message");
+    response.remove("update-type");
+
+    // TODO: Emit event
+  }
 }
 
-QString QtObsWebsocket::hashEncode(QString input) {
+const QString QtObsWebsocket::hashEncode(QString input) {
   QByteArray inputArray(input.toUtf8());
   QByteArray outputArray = QCryptographicHash::hash(inputArray, QCryptographicHash::Sha256);
   return outputArray.toBase64();
 }
 
-QJsonObject QtObsWebsocket::responseToJsonObject(QString reponse) {
+const QJsonObject QtObsWebsocket::responseToJsonObject(QString reponse) {
   QJsonDocument doc = QJsonDocument::fromJson(reponse.toUtf8());
   QJsonObject jsonResponseObject = doc.object();
   return jsonResponseObject;
 }
 
-QString QtObsWebsocket::jsonObjectToString(QJsonObject request) {
+const QString QtObsWebsocket::jsonObjectToString(QJsonObject request) {
   QJsonDocument doc(request);
   return QString(doc.toJson(QJsonDocument::Compact));
 }
 
-QJsonObject QtObsWebsocket::sendRequest(QString requestType,
-                                        std::optional<QJsonObject> requestParameters) {
-  const QString messageId = generateMessageId();
+QJsonObject QtObsWebsocket::sendRequest(QString request_type,
+                                        std::optional<QJsonObject> request_parameters) {
+  const QString message_id = [&]() -> QString {
+    QString new_message_id;
+    do {
+      new_message_id = this->generateMessageId();
+    } while (m_message_handler.find(new_message_id) != m_message_handler.end());
+    return new_message_id;
+  }();
 
   QJsonObject requestBody;
-  requestBody["request-type"] = requestType;
-  requestBody["message-id"] = messageId;
+  requestBody["request-type"] = request_type;
+  requestBody["message-id"] = message_id;
 
-  if (requestParameters != std::nullopt) {
-    QStringList keys = requestParameters->keys();
+  if (request_parameters != std::nullopt) {
+    QStringList keys = request_parameters->keys();
     for (const auto& key : keys) {
-      requestBody[key] = requestParameters->value(key);
+      requestBody[key] = request_parameters->value(key);
     }
   }
 
+  m_message_handler.insert(message_id, QJsonObject());
   QString message = jsonObjectToString(requestBody);
   m_socket.sendTextMessage(message);
 
@@ -189,10 +214,7 @@ QJsonObject QtObsWebsocket::sendRequest(QString requestType,
     loop.exec();
   }
 
-  QString response = m_response;
-  m_response.clear();
-
-  return responseToJsonObject(response);
+  return m_response;
 }
 
 void QtObsWebsocket::sendAuthenticatedCommand(QString command,

@@ -1,6 +1,7 @@
 #ifndef QTOBSWEBSOCKET_H
 #define QTOBSWEBSOCKET_H
 
+#include <QMap>
 #include <QString>
 #include <QtCore/QObject>
 #include <QtWebSockets/QWebSocket>
@@ -16,8 +17,8 @@ class QtObsWebsocket : public QObject {
   QtObsWebsocket(QUrl url, std::optional<QString> password);
   QtObsWebsocket(QString ip_address, quint16 port, std::optional<QString> password);
   ~QtObsWebsocket();
-  OBSVersion getVersion();
-  OBSAuthInfo getAuthInfo();
+  const OBSVersion getVersion();
+  const OBSAuthInfo getAuthInfo();
   void startRecording();
   void stopRecording();
   void startStreaming();
@@ -33,7 +34,7 @@ class QtObsWebsocket : public QObject {
  private:
   void connect(std::optional<QString> password);
   void disconnect();
-  [[nodiscard]] bool authenticate(QString password, OBSAuthInfo authInfo);
+  [[nodiscard]] const bool authenticate(QString password, OBSAuthInfo auth_info);
 
   void sendAuthenticatedCommand(QString command,
                                 std::optional<QJsonObject> parameters = std::nullopt);
@@ -42,15 +43,16 @@ class QtObsWebsocket : public QObject {
     QString requestType,
     std::optional<QJsonObject> requestParameters = std::nullopt);
 
-  [[nodiscard]] QString generateMessageId(const size_t length = 16);
-  [[nodiscard]] QString hashEncode(QString input);
-  [[nodiscard]] QJsonObject responseToJsonObject(QString reponse);
-  [[nodiscard]] QString jsonObjectToString(QJsonObject request);
+  [[nodiscard]] static const QString generateMessageId(const size_t length = 16);
+  [[nodiscard]] static const QString hashEncode(QString input);
+  [[nodiscard]] static const QJsonObject responseToJsonObject(QString reponse);
+  [[nodiscard]] static const QString jsonObjectToString(QJsonObject request);
 
   QWebSocket m_socket;
-  QString m_response = {};
   QUrl m_url = QUrl("ws://127.0.0.1:4444");
   bool m_authenticated = {false};
+  QJsonObject m_response = {};
+  QMap<QString, QJsonObject> m_message_handler{};
 };
 
 #endif  // QTOBSWEBSOCKET_H
